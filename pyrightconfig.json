@@ -1,0 +1,6 @@
+{
+    // Install LSP-json to get validation and autocompletion in this file.
+    "extraPaths": [
+        "F:/量化研究/vnpy库/vnpy/build/lib",
+    ]
+}
