@@ -1,6 +1,6 @@
 # encoding=utf-8
 import ctypes
-from ctpwrapper.base import Base
+from .base import Base
 
 
 class DisseminationField(Base):

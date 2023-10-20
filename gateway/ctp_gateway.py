@@ -1,7 +1,7 @@
 import sys
 from datetime import datetime
 from time import sleep
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 from pathlib import Path
 
 from vnpy.event import EventEngine
@@ -149,7 +149,7 @@ class CtpGateway(BaseGateway):
         "授权编码": ""
     }
 
-    exchanges: List[str] = list(EXCHANGE_CTP2VT.values())
+    exchanges: List[Exchange] = list(EXCHANGE_CTP2VT.values())
 
     def __init__(self, event_engine: EventEngine, gateway_name: str) -> None:
         """构造函数"""
@@ -216,8 +216,7 @@ class CtpGateway(BaseGateway):
         """输出错误信息日志"""
         error_id: int = error["ErrorID"]
         error_msg: str = error["ErrorMsg"]
-        msg: str = f"{msg}，代码：{error_id}，信息：{error_msg}"
-        self.write_log(msg)
+        self.write_log(f"{msg}，代码：{error_id}，信息：{error_msg}")
 
     def process_timer_event(self, event) -> None:
         """定时事件处理"""
@@ -271,16 +270,16 @@ class CtpMdApi(MdApiPy):
         self.login_status = False
         self.gateway.write_log(f"行情服务器连接断开，原因{reason}")
 
-    def onRspUserLogin(self, data: dict, error: dict, reqid: int, last: bool) -> None:
+    def OnRspUserLogin(self, pRspUserLogin, pRspInfo, nRequestID, bIsLast) -> None:
         """用户登录请求回报"""
-        if not error["ErrorID"]:
+        if not pRspInfo:
             self.login_status = True
             self.gateway.write_log("行情服务器登录成功")
 
             for symbol in self.subscribed:
                 self.subscribeMarketData(symbol)
         else:
-            self.gateway.write_error("行情服务器登录失败", error)
+            self.gateway.write_error("行情服务器登录失败", pRspInfo.ErrorID)
 
     def onRspError(self, error: dict, reqid: int, last: bool) -> None:
         """请求报错回报"""
@@ -301,7 +300,7 @@ class CtpMdApi(MdApiPy):
 
         # 过滤还没有收到合约数据前的行情推送
         symbol: str = data["InstrumentID"]
-        contract: ContractData = symbol_contract_map.get(symbol, None)
+        contract: ContractData | None = symbol_contract_map.get(symbol, None)
         if not contract:
             return
 
@@ -460,11 +459,11 @@ class CtpTdApi(TraderApiPy):
             self.auth_failed = True
             self.gateway.write_error("交易服务器授权验证失败", pRspInfo.ErrorID)
 
-    def onRspUserLogin(self, data: dict, error: dict, reqid: int, last: bool) -> None:
+    def OnRspUserLogin(self, pRspUserLogin, pRspInfo, nRequestID, bIsLast) -> None:
         """用户登录请求回报"""
-        if not error["ErrorID"]:
-            self.frontid = data["FrontID"]
-            self.sessionid = data["SessionID"]
+        if not pRspInfo:
+            self.frontid = pRspUserLogin.FrontID
+            self.sessionid = pRspUserLogin.SessionID
             self.login_status = True
             self.gateway.write_log("交易服务器登录成功")
 
@@ -473,12 +472,19 @@ class CtpTdApi(TraderApiPy):
                 "BrokerID": self.brokerid,
                 "InvestorID": self.userid
             }
+
             self.reqid += 1
+            from ..api.ApiStructure import InputExecOrderActionField
+            pSettlementInfoConfirm = InputExecOrderActionField()
+
+            # def ReqSettlementInfoConfirm(self, pSettlementInfoConfirm: "SettlementInfoConfirmField", 
+            # nRequestID: int) -> int:
+
             self.reqSettlementInfoConfirm(ctp_req, self.reqid)
         else:
             self.login_failed = True
 
-            self.gateway.write_error("交易服务器登录失败", error)
+            self.gateway.write_error("交易服务器登录失败", pRspInfo.ErrorID)
 
     def onRspOrderInsert(self, data: dict, error: dict, reqid: int, last: bool) -> None:
         """委托下单失败回报"""
@@ -528,12 +534,12 @@ class CtpTdApi(TraderApiPy):
 
         # 必须已经收到了合约信息后才能处理
         symbol: str = data["InstrumentID"]
-        contract: ContractData = symbol_contract_map.get(symbol, None)
+        contract: ContractData | None = symbol_contract_map.get(symbol, None)
 
         if contract:
             # 获取之前缓存的持仓数据缓存
             key: str = f"{data['InstrumentID'], data['PosiDirection']}"
-            position: PositionData = self.positions.get(key, None)
+            position: PositionData | None = self.positions.get(key, None)
             if not position:
                 position = PositionData(
                     symbol=data["InstrumentID"],
@@ -864,3 +870,6 @@ def adjust_price(price: float) -> float:
     if price == MAX_FLOAT:
         price = 0
     return price
+
+def to_str(b: bytes) -> str:
+    return b.decode('utf8')

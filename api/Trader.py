@@ -19,7 +19,7 @@ along with ctpwrapper.  If not, see <http://www.gnu.org/licenses/>.
 import time
 from typing import Optional
 
-from ctpwrapper.ApiStructure import (
+from .ApiStructure import (
     FensUserInfoField, UserSystemInfoField,
     ReqAuthenticateField, ReqGenUserCaptchaField,
     ReqGenUserTextField, ReqQueryAccountField,
@@ -69,7 +69,7 @@ from ctpwrapper.ApiStructure import (
     QrySPBMInvestorPortfDefField, QryInvestorPortfMarginRatioField,
     QryInvestorProdSPBMDetailField
 )
-from ctpwrapper.TraderApi import TraderApiWrapper
+from .TraderApi import TraderApiWrapper
 
 
 class TraderApiPy(TraderApiWrapper):
