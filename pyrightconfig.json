@@ -1,6 +1,0 @@
-{
-	// Install LSP-json to get validation and autocompletion in this file.
-	"extraPaths": [
-		"/home/puff/scripts/quant_project/vnpy/vnpy/build/lib"
-	]
-}
