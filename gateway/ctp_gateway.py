@@ -29,6 +29,12 @@ from vnpy.trader.object import (
 from vnpy.trader.utility import get_folder_path, ZoneInfo
 from vnpy.trader.event import EVENT_TIMER
 
+from ..api.ApiStructure import (
+    RspInfoField,
+    RspUserLoginField,
+    SettlementInfoConfirmField,
+    InputOrderField,
+    )
 from ..api.Md import MdApiPy
 from ..api.Trader import TraderApiPy
 from ..api.ctp_constant import (
@@ -459,7 +465,7 @@ class CtpTdApi(TraderApiPy):
             self.auth_failed = True
             self.gateway.write_error("交易服务器授权验证失败", pRspInfo.ErrorID)
 
-    def OnRspUserLogin(self, pRspUserLogin, pRspInfo, nRequestID, bIsLast) -> None:
+    def OnRspUserLogin(self, pRspUserLogin: RspUserLoginField, pRspInfo: RspInfoField, nRequestID, bIsLast) -> None:
         """用户登录请求回报"""
         if not pRspInfo:
             self.frontid = pRspUserLogin.FrontID
@@ -468,45 +474,33 @@ class CtpTdApi(TraderApiPy):
             self.gateway.write_log("交易服务器登录成功")
 
             # 自动确认结算单
-            ctp_req: dict = {
-                "BrokerID": self.brokerid,
-                "InvestorID": self.userid
-            }
-
             self.reqid += 1
-            from ..api.ApiStructure import InputExecOrderActionField
-            pSettlementInfoConfirm = InputExecOrderActionField()
-
-            # def ReqSettlementInfoConfirm(self, pSettlementInfoConfirm: "SettlementInfoConfirmField", 
-            # nRequestID: int) -> int:
-
-            self.reqSettlementInfoConfirm(ctp_req, self.reqid)
+            pSettlementInfoConfirm = SettlementInfoConfirmField(BrokerID=self.brokerid, InvestorID=self.userid, )
+            self.ReqSettlementInfoConfirm(pSettlementInfoConfirm, self.reqid)
         else:
             self.login_failed = True
-
             self.gateway.write_error("交易服务器登录失败", pRspInfo.ErrorID)
 
-    def onRspOrderInsert(self, data: dict, error: dict, reqid: int, last: bool) -> None:
+    def OnRspOrderInsert(self, pInputOrder: InputOrderField, pRspInfo: RspInfoField, nRequestID, bIsLast) -> None:
         """委托下单失败回报"""
-        order_ref: str = data["OrderRef"]
+        order_ref: str = to_str(pInputOrder.OrderRef)
         orderid: str = f"{self.frontid}_{self.sessionid}_{order_ref}"
 
-        symbol: str = data["InstrumentID"]
+        symbol: str = to_str(pInputOrder.InstrumentID)
         contract: ContractData = symbol_contract_map[symbol]
 
         order: OrderData = OrderData(
             symbol=symbol,
             exchange=contract.exchange,
             orderid=orderid,
-            direction=DIRECTION_CTP2VT[data["Direction"]],
-            offset=OFFSET_CTP2VT.get(data["CombOffsetFlag"], Offset.NONE),
-            price=data["LimitPrice"],
-            volume=data["VolumeTotalOriginal"],
+            direction=DIRECTION_CTP2VT[to_str(pInputOrder.Direction)],
+            offset=OFFSET_CTP2VT.get(to_str(pInputOrder.CombOffsetFlag), Offset.NONE),
+            price=pInputOrder.LimitPrice,
+            volume=pInputOrder.VolumeTotalOriginal,
             status=Status.REJECTED,
             gateway_name=self.gateway_name
         )
         self.gateway.on_order(order)
-
         self.gateway.write_error("交易委托失败", error)
 
     def onRspOrderAction(self, data: dict, error: dict, reqid: int, last: bool) -> None:
