@@ -218,10 +218,10 @@ class CtpGateway(BaseGateway):
         self.td_api.close()
         self.md_api.close()
 
-    def write_error(self, msg: str, error: dict) -> None:
+    def write_error(self, msg: str, error: RspInfoField) -> None:
         """输出错误信息日志"""
-        error_id: int = error["ErrorID"]
-        error_msg: str = error["ErrorMsg"]
+        error_id: int = error.ErrorID
+        error_msg: str = to_str(error.ErrorMsg)
         self.write_log(f"{msg}，代码：{error_id}，信息：{error_msg}")
 
     def process_timer_event(self, event) -> None:
@@ -276,7 +276,7 @@ class CtpMdApi(MdApiPy):
         self.login_status = False
         self.gateway.write_log(f"行情服务器连接断开，原因{reason}")
 
-    def OnRspUserLogin(self, pRspUserLogin, pRspInfo, nRequestID, bIsLast) -> None:
+    def OnRspUserLogin(self, pRspUserLogin: RspUserLoginField, pRspInfo: RspInfoField, nRequestID, bIsLast) -> None:
         """用户登录请求回报"""
         if not pRspInfo:
             self.login_status = True
@@ -285,7 +285,7 @@ class CtpMdApi(MdApiPy):
             for symbol in self.subscribed:
                 self.subscribeMarketData(symbol)
         else:
-            self.gateway.write_error("行情服务器登录失败", pRspInfo.ErrorID)
+            self.gateway.write_error("行情服务器登录失败", pRspInfo)
 
     def onRspError(self, error: dict, reqid: int, last: bool) -> None:
         """请求报错回报"""
@@ -455,7 +455,7 @@ class CtpTdApi(TraderApiPy):
         self.login_status = False
         self.gateway.write_log(f"交易服务器连接断开，原因{reason}")
 
-    def OnRspAuthenticate(self, pRspAuthenticate, pRspInfo, nRequestID, bIsLast) -> None:
+    def OnRspAuthenticate(self, pRspAuthenticate, pRspInfo: RspInfoField, nRequestID, bIsLast) -> None:
         """用户授权验证回报"""
         if not pRspInfo:
             self.auth_status = True
@@ -463,7 +463,7 @@ class CtpTdApi(TraderApiPy):
             self.login()
         else:
             self.auth_failed = True
-            self.gateway.write_error("交易服务器授权验证失败", pRspInfo.ErrorID)
+            self.gateway.write_error("交易服务器授权验证失败", pRspInfo)
 
     def OnRspUserLogin(self, pRspUserLogin: RspUserLoginField, pRspInfo: RspInfoField, nRequestID, bIsLast) -> None:
         """用户登录请求回报"""
@@ -479,7 +479,7 @@ class CtpTdApi(TraderApiPy):
             self.ReqSettlementInfoConfirm(pSettlementInfoConfirm, self.reqid)
         else:
             self.login_failed = True
-            self.gateway.write_error("交易服务器登录失败", pRspInfo.ErrorID)
+            self.gateway.write_error("交易服务器登录失败", pRspInfo)
 
     def OnRspOrderInsert(self, pInputOrder: InputOrderField, pRspInfo: RspInfoField, nRequestID, bIsLast) -> None:
         """委托下单失败回报"""
