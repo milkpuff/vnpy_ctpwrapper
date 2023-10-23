@@ -34,6 +34,12 @@ from ..api.ApiStructure import (
     RspUserLoginField,
     SettlementInfoConfirmField,
     InputOrderField,
+    InputOrderActionField,
+    QryInstrumentField,
+    InvestorPositionField,
+    QryInvestorPositionField,
+    TradingAccountField,
+    InstrumentField,
     )
 from ..api.Md import MdApiPy
 from ..api.Trader import TraderApiPy
@@ -218,10 +224,10 @@ class CtpGateway(BaseGateway):
         self.td_api.close()
         self.md_api.close()
 
-    def write_error(self, msg: str, error: RspInfoField) -> None:
+    def write_error(self, msg: str, pRspInfo: RspInfoField) -> None:
         """输出错误信息日志"""
-        error_id: int = error.ErrorID
-        error_msg: str = to_str(error.ErrorMsg)
+        error_id: int = pRspInfo.ErrorID
+        error_msg: str = to_str(pRspInfo.ErrorMsg)
         self.write_log(f"{msg}，代码：{error_id}，信息：{error_msg}")
 
     def process_timer_event(self, event) -> None:
@@ -501,55 +507,57 @@ class CtpTdApi(TraderApiPy):
             gateway_name=self.gateway_name
         )
         self.gateway.on_order(order)
-        self.gateway.write_error("交易委托失败", error)
+        self.gateway.write_error("交易委托失败", pRspInfo)
 
-    def onRspOrderAction(self, data: dict, error: dict, reqid: int, last: bool) -> None:
+    def OnRspOrderAction(self, pInputOrderAction: InputOrderActionField, pRspInfo: RspInfoField, nRequestID, bIsLast) -> None:
         """委托撤单失败回报"""
-        self.gateway.write_error("交易撤单失败", error)
+        self.gateway.write_error("交易撤单失败", pRspInfo)
 
-    def onRspSettlementInfoConfirm(self, data: dict, error: dict, reqid: int, last: bool) -> None:
+    def OnRspSettlementInfoConfirm(self, pSettlementInfoConfirm: InputOrderActionField, pRspInfo: RspInfoField, nRequestID, bIsLast) -> None:
         """确认结算单回报"""
         self.gateway.write_log("结算信息确认成功")
 
         # 由于流控，单次查询可能失败，通过while循环持续尝试，直到成功发出请求
         while True:
             self.reqid += 1
-            n: int = self.reqQryInstrument({}, self.reqid)
+            pQryInstrument = QryInstrumentField()
+            n: int = self.ReqQryInstrument(pQryInstrument, self.reqid)
 
             if not n:
                 break
             else:
                 sleep(1)
 
-    def onRspQryInvestorPosition(self, data: dict, error: dict, reqid: int, last: bool) -> None:
+    def OnRspQryInvestorPosition(self, pInvestorPosition: InvestorPositionField, pRspInfo: RspInfoField, nRequestID, bIsLast: bool) -> None:
         """持仓查询回报"""
-        if not data:
+        if not pInvestorPosition:
             return
 
         # 必须已经收到了合约信息后才能处理
-        symbol: str = data["InstrumentID"]
+        symbol: str = to_str(pInvestorPosition.InstrumentID)
         contract: ContractData | None = symbol_contract_map.get(symbol, None)
+        direction = to_str(pInvestorPosition.PosiDirection)
 
         if contract:
             # 获取之前缓存的持仓数据缓存
-            key: str = f"{data['InstrumentID'], data['PosiDirection']}"
+            key: str = f"{symbol}.{direction}"
             position: PositionData | None = self.positions.get(key, None)
             if not position:
                 position = PositionData(
-                    symbol=data["InstrumentID"],
+                    symbol=symbol,
                     exchange=contract.exchange,
-                    direction=DIRECTION_CTP2VT[data["PosiDirection"]],
+                    direction=DIRECTION_CTP2VT[direction],
                     gateway_name=self.gateway_name
                 )
                 self.positions[key] = position
 
             # 对于上期所昨仓需要特殊处理
             if position.exchange in {Exchange.SHFE, Exchange.INE}:
-                if data["YdPosition"] and not data["TodayPosition"]:
-                    position.yd_volume = data["Position"]
+                if pInvestorPosition.YdPosition and not pInvestorPosition.TodayPosition:
+                    position.yd_volume = pInvestorPosition.Position
             # 对于其他交易所昨仓的计算
             else:
-                position.yd_volume = data["Position"] - data["TodayPosition"]
+                position.yd_volume = pInvestorPosition.Position - pInvestorPosition.TodayPosition
 
             # 获取合约的乘数信息
             size: int = contract.size
@@ -558,52 +566,52 @@ class CtpTdApi(TraderApiPy):
             cost: float = position.price * position.volume * size
 
             # 累加更新持仓数量和盈亏
-            position.volume += data["Position"]
-            position.pnl += data["PositionProfit"]
+            position.volume += pInvestorPosition.Position
+            position.pnl += pInvestorPosition.PositionProfit
 
             # 计算更新后的持仓总成本和均价
             if position.volume and size:
-                cost += data["PositionCost"]
+                cost += pInvestorPosition.PositionCost
                 position.price = cost / (position.volume * size)
 
             # 更新仓位冻结数量
             if position.direction == Direction.LONG:
-                position.frozen += data["ShortFrozen"]
+                position.frozen += pInvestorPosition.ShortFrozen
             else:
-                position.frozen += data["LongFrozen"]
+                position.frozen += pInvestorPosition.LongFrozen
 
-        if last:
+        if bIsLast:
             for position in self.positions.values():
                 self.gateway.on_position(position)
 
             self.positions.clear()
 
-    def onRspQryTradingAccount(self, data: dict, error: dict, reqid: int, last: bool) -> None:
+    def OnRspQryTradingAccount(self, pTradingAccount: TradingAccountField, pRspInfo: RspInfoField, nRequestID, bIsLast) -> None:
         """资金查询回报"""
-        if "AccountID" not in data:
+        if not pTradingAccount.AccountID:
             return
 
         account: AccountData = AccountData(
-            accountid=data["AccountID"],
-            balance=data["Balance"],
-            frozen=data["FrozenMargin"] + data["FrozenCash"] + data["FrozenCommission"],
+            accountid=to_str(pTradingAccount.AccountID),
+            balance=pTradingAccount.Balance,
+            frozen=pTradingAccount.FrozenMargin + pTradingAccount.FrozenCash + pTradingAccount.FrozenCommission,
             gateway_name=self.gateway_name
         )
-        account.available = data["Available"]
+        account.available = pTradingAccount.Available
 
         self.gateway.on_account(account)
 
-    def onRspQryInstrument(self, data: dict, error: dict, reqid: int, last: bool) -> None:
+    def OnRspQryInstrument(self, pInstrument: InstrumentField, pRspInfo: RspInfoField, nRequestID, bIsLast) -> None:
         """合约查询回报"""
-        product: Product = PRODUCT_CTP2VT.get(data["ProductClass"], None)
+        product: Product = PRODUCT_CTP2VT.get(to_str(pInstrument.ProductClass), None)
         if product:
             contract: ContractData = ContractData(
-                symbol=data["InstrumentID"],
-                exchange=EXCHANGE_CTP2VT[data["ExchangeID"]],
-                name=data["InstrumentName"],
+                symbol=to_str(pInstrument.InstrumentID),
+                exchange=EXCHANGE_CTP2VT[to_str(pInstrument.ExchangeID)],
+                name=to_str(pInstrument.InstrumentName),
                 product=product,
-                size=data["VolumeMultiple"],
-                pricetick=data["PriceTick"],
+                size=pInstrument.VolumeMultiple,
+                pricetick=pInstrument.PriceTick,
                 gateway_name=self.gateway_name
             )
 
@@ -611,16 +619,16 @@ class CtpTdApi(TraderApiPy):
             if contract.product == Product.OPTION:
                 # 移除郑商所期权产品名称带有的C/P后缀
                 if contract.exchange == Exchange.CZCE:
-                    contract.option_portfolio = data["ProductID"][:-1]
+                    contract.option_portfolio = to_str(pInstrument.ProductID)[:-1]
                 else:
-                    contract.option_portfolio = data["ProductID"]
+                    contract.option_portfolio = to_str(pInstrument.ProductID)
 
-                contract.option_underlying = data["UnderlyingInstrID"]
-                contract.option_type = OPTIONTYPE_CTP2VT.get(data["OptionsType"], None)
-                contract.option_strike = data["StrikePrice"]
-                contract.option_index = str(data["StrikePrice"])
-                contract.option_listed = datetime.strptime(data["OpenDate"], "%Y%m%d")
-                contract.option_expiry = datetime.strptime(data["ExpireDate"], "%Y%m%d")
+                contract.option_underlying = to_str(pInstrument.UnderlyingInstrID)
+                contract.option_type = OPTIONTYPE_CTP2VT.get(to_str(pInstrument.OptionsType), None)
+                contract.option_strike = pInstrument.StrikePrice
+                contract.option_index = str(pInstrument.StrikePrice)
+                contract.option_listed = datetime.strptime(to_str(pInstrument.OpenDate), "%Y%m%d")
+                contract.option_expiry = datetime.strptime(to_str(pInstrument.ExpireDate), "%Y%m%d")
 
             self.gateway.on_contract(contract)
 

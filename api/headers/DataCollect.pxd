@@ -4,5 +4,5 @@
 from libc.string cimport const_char
 
 cdef extern from "DataCollect.h":
-    int CTP_GetSystemInfo(char *pSystemInfo, int &nLen) nogil except +
-    const_char *CTP_GetDataCollectApiVersion() nogil except +
+    int CTP_GetSystemInfo(char *pSystemInfo, int &nLen) except + nogil
+    const_char *CTP_GetDataCollectApiVersion() except + nogil

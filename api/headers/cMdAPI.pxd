@@ -39,73 +39,73 @@ cdef extern from 'ThostFtdcMdApi.h':
 
         #  删除接口对象本身
         #  @remark 不再使用本接口对象时,调用该函数删除接口对象
-        void Release() nogil except +
+        void Release() except + nogil
 
         #  初始化
         #  @remark 初始化运行环境,只有调用后,接口才开始工作
-        void Init() nogil except +
+        void Init() except + nogil
 
         #  等待接口线程结束运行
         #  @return 线程退出代码
-        int Join() nogil except +
+        int Join() except + nogil
 
         #  获取当前交易日
         #  @retrun 获取到的交易日
         #  @remark 只有登录成功后,才能得到正确的交易日
-        const_char *GetTradingDay() nogil except +
+        const_char *GetTradingDay() except + nogil
 
         #  注册前置机网络地址
         #  @param pszFrontAddress：前置机网络地址。
         #  @remark 网络地址的格式为：“protocol://ipaddress:port”，如：”tcp://127.0.0.1:17001”。
         #  @remark “tcp”代表传输协议，“127.0.0.1”代表服务器地址。”17001”代表服务器端口号。
-        void RegisterFront(char *pszFrontAddress) nogil except +
+        void RegisterFront(char *pszFrontAddress) except + nogil
 
         #  注册名字服务器网络地址
         #  @param pszNsAddress：名字服务器网络地址。
         #  @remark 网络地址的格式为：“protocol://ipaddress:port”，如：”tcp://127.0.0.1:12001”。
         #  @remark “tcp”代表传输协议，“127.0.0.1”代表服务器地址。”12001”代表服务器端口号。
         #  @remark RegisterNameServer优先于RegisterFront
-        void RegisterNameServer(char *pszNsAddress) nogil except +
+        void RegisterNameServer(char *pszNsAddress) except + nogil
 
         #  注册名字服务器用户信息
         #  @param pFensUserInfo：用户信息。
-        void RegisterFensUserInfo(CThostFtdcFensUserInfoField *pFensUserInfo) nogil except +
+        void RegisterFensUserInfo(CThostFtdcFensUserInfoField *pFensUserInfo) except + nogil
 
         #  注册回调接口
         #  @param pSpi 派生自回调接口类的实例
-        void RegisterSpi(CMdSpi *pSpi) nogil except +
+        void RegisterSpi(CMdSpi *pSpi) except + nogil
 
         #  订阅行情。
         #  @param ppInstrumentID 合约ID
         #  @param nCount 要订阅/退订行情的合约个数
-        int SubscribeMarketData(char *ppInstrumentID[], int nCount) nogil except +
+        int SubscribeMarketData(char *ppInstrumentID[], int nCount) except + nogil
 
         #  退订行情。
         #  @param ppInstrumentID 合约ID
         #  @param nCount 要订阅/退订行情的合约个数
-        int UnSubscribeMarketData(char *ppInstrumentID[], int nCount) nogil except +
+        int UnSubscribeMarketData(char *ppInstrumentID[], int nCount) except + nogil
 
         #订阅询价。
         #@param ppInstrumentID 合约ID
         #@param nCount 要订阅/退订行情的合约个数
-        int SubscribeForQuoteRsp(char *ppInstrumentID[], int nCount) nogil except +
+        int SubscribeForQuoteRsp(char *ppInstrumentID[], int nCount) except + nogil
 
         #退订询价。
         #@param ppInstrumentID 合约ID
         #@param nCount 要订阅/退订行情的合约个数
-        int UnSubscribeForQuoteRsp(char *ppInstrumentID[], int nCount) nogil except +
+        int UnSubscribeForQuoteRsp(char *ppInstrumentID[], int nCount) except + nogil
 
         #  用户登录请求
-        int ReqUserLogin(CThostFtdcReqUserLoginField *pReqUserLoginField, int nRequestID) nogil except +
+        int ReqUserLogin(CThostFtdcReqUserLoginField *pReqUserLoginField, int nRequestID) except + nogil
 
         #  登出请求
-        int ReqUserLogout(CThostFtdcUserLogoutField *pUserLogout, int nRequestID) nogil except +
+        int ReqUserLogout(CThostFtdcUserLogoutField *pUserLogout, int nRequestID) except + nogil
 
         # 请求查询组播合约
-        int ReqQryMulticastInstrument(CThostFtdcQryMulticastInstrumentField *pQryMulticastInstrument, int nRequestID) nogil except +
+        int ReqQryMulticastInstrument(CThostFtdcQryMulticastInstrumentField *pQryMulticastInstrument, int nRequestID) except + nogil
 
 cdef extern from 'ThostFtdcMdApi.h' namespace "CThostFtdcMdApi":
-    CMdApi  *CreateFtdcMdApi(const_char *pszFlowPath, cbool bIsUsingUdp, cbool bIsMulticast) nogil except +
+    CMdApi  *CreateFtdcMdApi(const_char *pszFlowPath, cbool bIsUsingUdp, cbool bIsMulticast) except + nogil
 
 
 cdef extern from 'CMdAPI.h':
