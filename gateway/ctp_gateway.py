@@ -45,6 +45,8 @@ from ..api.ApiStructure import (
     ReqAuthenticateField,
     ReqUserLoginField,
     QryTradingAccountField,
+    SpecificInstrumentField,
+    DepthMarketDataField,
 )
 from ..api.Md import MdApiPy
 from ..api.Trader import TraderApiPy
@@ -278,57 +280,55 @@ class CtpMdApi(MdApiPy):
 
         self.current_date: str = datetime.now().strftime("%Y%m%d")
 
-    def onFrontConnected(self) -> None:
+    def OnFrontConnected(self) -> None:
         """服务器连接成功回报"""
         self.gateway.write_log("行情服务器连接成功")
         self.login()
 
-    def onFrontDisconnected(self, reason: int) -> None:
+    def OnFrontDisconnected(self, nReason: int) -> None:
         """服务器连接断开回报"""
         self.login_status = False
-        self.gateway.write_log(f"行情服务器连接断开，原因{reason}")
+        self.gateway.write_log(f"行情服务器连接断开，原因{nReason}")
 
     def OnRspUserLogin(self, pRspUserLogin: RspUserLoginField, pRspInfo: RspInfoField, nRequestID, bIsLast) -> None:
         """用户登录请求回报"""
         if not pRspInfo:
             self.login_status = True
             self.gateway.write_log("行情服务器登录成功")
-
-            for symbol in self.subscribed:
-                self.subscribeMarketData(symbol)
+            pInstrumentID = list(self.subscribed)
+            self.SubscribeMarketData(pInstrumentID)
         else:
             self.gateway.write_error("行情服务器登录失败", pRspInfo)
 
-    def onRspError(self, error: dict, reqid: int, last: bool) -> None:
+    def OnRspError(self, pRspInfo: RspInfoField, nRequestID, bIsLast) -> None:
         """请求报错回报"""
-        self.gateway.write_error("行情接口报错", error)
+        self.gateway.write_error("行情接口报错", pRspInfo)
 
-    def onRspSubMarketData(self, data: dict, error: dict, reqid: int, last: bool) -> None:
+    def OnRspSubMarketData(self, pSpecificInstrument: SpecificInstrumentField, pRspInfo: RspInfoField, nRequestID, bIsLast) -> None:
         """订阅行情回报"""
-        if not error or not error["ErrorID"]:
+        if not (pRspInfo and pRspInfo.ErrorID):
             return
+        self.gateway.write_error("行情订阅失败", pRspInfo)
 
-        self.gateway.write_error("行情订阅失败", error)
-
-    def onRtnDepthMarketData(self, data: dict) -> None:
+    def OnRtnDepthMarketData(self, pDepthMarketData: DepthMarketDataField) -> None:
         """行情数据推送"""
         # 过滤没有时间戳的异常行情数据
-        if not data["UpdateTime"]:
+        if not pDepthMarketData.UpdateTime:
             return
 
         # 过滤还没有收到合约数据前的行情推送
-        symbol: str = data["InstrumentID"]
+        symbol: str = to_str(pDepthMarketData.InstrumentID)
         contract: ContractData | None = symbol_contract_map.get(symbol, None)
         if not contract:
             return
 
         # 对大商所的交易日字段取本地日期
-        if not data["ActionDay"] or contract.exchange == Exchange.DCE:
+        if not pDepthMarketData.ActionDay or contract.exchange == Exchange.DCE:
             date_str: str = self.current_date
         else:
-            date_str: str = data["ActionDay"]
+            date_str: str = to_str(pDepthMarketData.ActionDay)
 
-        timestamp: str = f"{date_str} {data['UpdateTime']}.{int(data['UpdateMillisec']/100)}"
+        timestamp: str = f"{date_str} {to_str(pDepthMarketData.UpdateTime)}.{int(pDepthMarketData.UpdateMillisec/100)}"
         dt: datetime = datetime.strptime(timestamp, "%Y%m%d %H:%M:%S.%f")
         dt: datetime = dt.replace(tzinfo=CHINA_TZ)
 
@@ -337,43 +337,43 @@ class CtpMdApi(MdApiPy):
             exchange=contract.exchange,
             datetime=dt,
             name=contract.name,
-            volume=data["Volume"],
-            turnover=data["Turnover"],
-            open_interest=data["OpenInterest"],
-            last_price=adjust_price(data["LastPrice"]),
-            limit_up=data["UpperLimitPrice"],
-            limit_down=data["LowerLimitPrice"],
-            open_price=adjust_price(data["OpenPrice"]),
-            high_price=adjust_price(data["HighestPrice"]),
-            low_price=adjust_price(data["LowestPrice"]),
-            pre_close=adjust_price(data["PreClosePrice"]),
-            bid_price_1=adjust_price(data["BidPrice1"]),
-            ask_price_1=adjust_price(data["AskPrice1"]),
-            bid_volume_1=data["BidVolume1"],
-            ask_volume_1=data["AskVolume1"],
+            volume=pDepthMarketData.Volume,
+            turnover=pDepthMarketData.Turnover,
+            open_interest=pDepthMarketData.OpenInterest,
+            last_price=adjust_price(pDepthMarketData.LastPrice),
+            limit_up=pDepthMarketData.UpperLimitPrice,
+            limit_down=pDepthMarketData.LowerLimitPrice,
+            open_price=adjust_price(pDepthMarketData.OpenPrice),
+            high_price=adjust_price(pDepthMarketData.HighestPrice),
+            low_price=adjust_price(pDepthMarketData.LowestPrice),
+            pre_close=adjust_price(pDepthMarketData.PreClosePrice),
+            bid_price_1=adjust_price(pDepthMarketData.BidPrice1),
+            ask_price_1=adjust_price(pDepthMarketData.AskPrice1),
+            bid_volume_1=pDepthMarketData.BidVolume1,
+            ask_volume_1=pDepthMarketData.AskVolume1,
             gateway_name=self.gateway_name
         )
 
-        if data["BidVolume2"] or data["AskVolume2"]:
-            tick.bid_price_2 = adjust_price(data["BidPrice2"])
-            tick.bid_price_3 = adjust_price(data["BidPrice3"])
-            tick.bid_price_4 = adjust_price(data["BidPrice4"])
-            tick.bid_price_5 = adjust_price(data["BidPrice5"])
+        if pDepthMarketData.BidVolume2 or pDepthMarketData.AskVolume2:
+            tick.bid_price_2 = adjust_price(pDepthMarketData.BidPrice2)
+            tick.bid_price_3 = adjust_price(pDepthMarketData.BidPrice3)
+            tick.bid_price_4 = adjust_price(pDepthMarketData.BidPrice4)
+            tick.bid_price_5 = adjust_price(pDepthMarketData.BidPrice5)
 
-            tick.ask_price_2 = adjust_price(data["AskPrice2"])
-            tick.ask_price_3 = adjust_price(data["AskPrice3"])
-            tick.ask_price_4 = adjust_price(data["AskPrice4"])
-            tick.ask_price_5 = adjust_price(data["AskPrice5"])
+            tick.ask_price_2 = adjust_price(pDepthMarketData.AskPrice2)
+            tick.ask_price_3 = adjust_price(pDepthMarketData.AskPrice3)
+            tick.ask_price_4 = adjust_price(pDepthMarketData.AskPrice4)
+            tick.ask_price_5 = adjust_price(pDepthMarketData.AskPrice5)
 
-            tick.bid_volume_2 = data["BidVolume2"]
-            tick.bid_volume_3 = data["BidVolume3"]
-            tick.bid_volume_4 = data["BidVolume4"]
-            tick.bid_volume_5 = data["BidVolume5"]
+            tick.bid_volume_2 = pDepthMarketData.BidVolume2
+            tick.bid_volume_3 = pDepthMarketData.BidVolume3
+            tick.bid_volume_4 = pDepthMarketData.BidVolume4
+            tick.bid_volume_5 = pDepthMarketData.BidVolume5
 
-            tick.ask_volume_2 = data["AskVolume2"]
-            tick.ask_volume_3 = data["AskVolume3"]
-            tick.ask_volume_4 = data["AskVolume4"]
-            tick.ask_volume_5 = data["AskVolume5"]
+            tick.ask_volume_2 = pDepthMarketData.AskVolume2
+            tick.ask_volume_3 = pDepthMarketData.AskVolume3
+            tick.ask_volume_4 = pDepthMarketData.AskVolume4
+            tick.ask_volume_5 = pDepthMarketData.AskVolume5
 
         self.gateway.on_tick(tick)
 
@@ -386,34 +386,34 @@ class CtpMdApi(MdApiPy):
         # 禁止重复发起连接，会导致异常崩溃
         if not self.connect_status:
             path: Path = get_folder_path(self.gateway_name.lower())
-            self.createFtdcMdApi((str(path) + "\\Md").encode("GBK"))
+            self.Create((str(path) + "\\Md"))
 
-            self.registerFront(address)
-            self.init()
+            self.RegisterFront(pszFrontAddress=address)
+            self.Init()
 
             self.connect_status = True
 
     def login(self) -> None:
         """用户登录"""
-        ctp_req: dict = {
-            "UserID": self.userid,
-            "Password": self.password,
-            "BrokerID": self.brokerid
-        }
+        pReqUserLogin = ReqUserLoginField(
+            BrokerID=self.brokerid,
+            UserID=self.userid,
+            Password=self.password,
+            )
 
         self.reqid += 1
-        self.reqUserLogin(ctp_req, self.reqid)
+        self.ReqUserLogin(pReqUserLogin, self.reqid)
 
     def subscribe(self, req: SubscribeRequest) -> None:
         """订阅行情"""
         if self.login_status:
-            self.subscribeMarketData(req.symbol)
+            self.SubscribeMarketData([req.symbol])
         self.subscribed.add(req.symbol)
 
     def close(self) -> None:
         """关闭连接"""
         if self.connect_status:
-            self.exit()
+            self.gateway.write_log('CtpMdApi close. ')
 
     def update_date(self) -> None:
         """更新当前日期"""
@@ -453,7 +453,7 @@ class CtpTdApi(TraderApiPy):
         self.positions: Dict[str, PositionData] = {}
         self.sysid_orderid_map: Dict[str, str] = {}
 
-    def onFrontConnected(self) -> None:
+    def OnFrontConnected(self) -> None:
         """服务器连接成功回报"""
         self.gateway.write_log("交易服务器连接成功")
 
@@ -462,7 +462,7 @@ class CtpTdApi(TraderApiPy):
         else:
             self.login()
 
-    def onFrontDisconnected(self, reason: int) -> None:
+    def OnFrontDisconnected(self, reason: int) -> None:
         """服务器连接断开回报"""
         self.login_status = False
         self.gateway.write_log(f"交易服务器连接断开，原因{reason}")

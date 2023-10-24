@@ -36,7 +36,7 @@ class MdApiPy(MdApiWrapper):
         :param bIsUsingUdp:
         :param bIsMulticast:
         """
-        super(MdApiPy, self).Create(pszFlowPath.encode(), bIsUsingUdp, bIsMulticast)
+        super(MdApiPy, self).Create(pszFlowPath.encode(), bIsUsingUdp, bIsMulticast)  # type: ignore
 
     def Init(self) -> None:
         """
