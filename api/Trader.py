@@ -20,7 +20,7 @@ import time
 from typing import Optional
 
 from .ApiStructure import (
-    FensUserInfoField, UserSystemInfoField,
+    FensUserInfoField, ReqUserAuthMethodField, UserSystemInfoField,
     ReqAuthenticateField, ReqGenUserCaptchaField,
     ReqGenUserTextField, ReqQueryAccountField,
     ReqTransferField, QueryCFMMCTradingAccountTokenField,
@@ -74,7 +74,7 @@ from .TraderApi import TraderApiWrapper
 
 class TraderApiPy(TraderApiWrapper):
 
-    def Create(self, pszFlowPath: Optional[str] = "") -> None:
+    def Create(self, pszFlowPath: str = "") -> None:
         super(TraderApiPy, self).Create(pszFlowPath.encode())
 
     def Release(self) -> None:
@@ -175,7 +175,7 @@ class TraderApiPy(TraderApiWrapper):
         """
         return super(TraderApiPy, self).ReqUserLogin(pReqUserLogin, nRequestID)
 
-    def ReqUserAuthMethod(self, pReqUserAuthMethod: "ReqUserAuthMethod", nRequestID: int) -> int:
+    def ReqUserAuthMethod(self, pReqUserAuthMethod: "ReqUserAuthMethodField", nRequestID: int) -> int:
         """
         查询用户当前支持的认证模式
         """

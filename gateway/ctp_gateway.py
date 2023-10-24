@@ -40,7 +40,12 @@ from ..api.ApiStructure import (
     QryInvestorPositionField,
     TradingAccountField,
     InstrumentField,
-    )
+    OrderField,
+    TradeField,
+    ReqAuthenticateField,
+    ReqUserLoginField,
+    QryTradingAccountField,
+)
 from ..api.Md import MdApiPy
 from ..api.Trader import TraderApiPy
 from ..api.ctp_constant import (
@@ -194,7 +199,8 @@ class CtpGateway(BaseGateway):
         ):
             md_address = "tcp://" + md_address
 
-        self.td_api.connect(td_address, userid, password, brokerid, auth_code, appid)
+        self.td_api.connect(td_address, userid, password,
+                            brokerid, auth_code, appid)
         self.md_api.connect(md_address, userid, password, brokerid)
 
         self.init_query()
@@ -442,8 +448,8 @@ class CtpTdApi(TraderApiPy):
 
         self.frontid: int = 0
         self.sessionid: int = 0
-        self.order_data: List[dict] = []
-        self.trade_data: List[dict] = []
+        self.order_data: List[OrderField] = []
+        self.trade_data: List[TradeField] = []
         self.positions: Dict[str, PositionData] = {}
         self.sysid_orderid_map: Dict[str, str] = {}
 
@@ -481,7 +487,8 @@ class CtpTdApi(TraderApiPy):
 
             # 自动确认结算单
             self.reqid += 1
-            pSettlementInfoConfirm = SettlementInfoConfirmField(BrokerID=self.brokerid, InvestorID=self.userid, )
+            pSettlementInfoConfirm = SettlementInfoConfirmField(
+                BrokerID=self.brokerid, InvestorID=self.userid, )
             self.ReqSettlementInfoConfirm(pSettlementInfoConfirm, self.reqid)
         else:
             self.login_failed = True
@@ -500,7 +507,8 @@ class CtpTdApi(TraderApiPy):
             exchange=contract.exchange,
             orderid=orderid,
             direction=DIRECTION_CTP2VT[to_str(pInputOrder.Direction)],
-            offset=OFFSET_CTP2VT.get(to_str(pInputOrder.CombOffsetFlag), Offset.NONE),
+            offset=OFFSET_CTP2VT.get(
+                to_str(pInputOrder.CombOffsetFlag), Offset.NONE),
             price=pInputOrder.LimitPrice,
             volume=pInputOrder.VolumeTotalOriginal,
             status=Status.REJECTED,
@@ -560,7 +568,7 @@ class CtpTdApi(TraderApiPy):
                 position.yd_volume = pInvestorPosition.Position - pInvestorPosition.TodayPosition
 
             # 获取合约的乘数信息
-            size: int = contract.size
+            size: float = contract.size
 
             # 计算之前已有仓位的持仓总成本
             cost: float = position.price * position.volume * size
@@ -594,7 +602,8 @@ class CtpTdApi(TraderApiPy):
         account: AccountData = AccountData(
             accountid=to_str(pTradingAccount.AccountID),
             balance=pTradingAccount.Balance,
-            frozen=pTradingAccount.FrozenMargin + pTradingAccount.FrozenCash + pTradingAccount.FrozenCommission,
+            frozen=pTradingAccount.FrozenMargin +
+            pTradingAccount.FrozenCash + pTradingAccount.FrozenCommission,
             gateway_name=self.gateway_name
         )
         account.available = pTradingAccount.Available
@@ -603,7 +612,7 @@ class CtpTdApi(TraderApiPy):
 
     def OnRspQryInstrument(self, pInstrument: InstrumentField, pRspInfo: RspInfoField, nRequestID, bIsLast) -> None:
         """合约查询回报"""
-        product: Product = PRODUCT_CTP2VT.get(to_str(pInstrument.ProductClass), None)
+        product: Product | None = PRODUCT_CTP2VT.get(to_str(pInstrument.ProductClass), None)
         if product:
             contract: ContractData = ContractData(
                 symbol=to_str(pInstrument.InstrumentID),
@@ -619,22 +628,27 @@ class CtpTdApi(TraderApiPy):
             if contract.product == Product.OPTION:
                 # 移除郑商所期权产品名称带有的C/P后缀
                 if contract.exchange == Exchange.CZCE:
-                    contract.option_portfolio = to_str(pInstrument.ProductID)[:-1]
+                    contract.option_portfolio = to_str(
+                        pInstrument.ProductID)[:-1]
                 else:
                     contract.option_portfolio = to_str(pInstrument.ProductID)
 
-                contract.option_underlying = to_str(pInstrument.UnderlyingInstrID)
-                contract.option_type = OPTIONTYPE_CTP2VT.get(to_str(pInstrument.OptionsType), None)
+                contract.option_underlying = to_str(
+                    pInstrument.UnderlyingInstrID)
+                contract.option_type = OPTIONTYPE_CTP2VT.get(
+                    to_str(pInstrument.OptionsType), None)  # type: ignore
                 contract.option_strike = pInstrument.StrikePrice
                 contract.option_index = str(pInstrument.StrikePrice)
-                contract.option_listed = datetime.strptime(to_str(pInstrument.OpenDate), "%Y%m%d")
-                contract.option_expiry = datetime.strptime(to_str(pInstrument.ExpireDate), "%Y%m%d")
+                contract.option_listed = datetime.strptime(
+                    to_str(pInstrument.OpenDate), "%Y%m%d")
+                contract.option_expiry = datetime.strptime(
+                    to_str(pInstrument.ExpireDate), "%Y%m%d")
 
             self.gateway.on_contract(contract)
 
             symbol_contract_map[contract.symbol] = contract
 
-        if last:
+        if bIsLast:
             self.contract_inited = True
             self.gateway.write_log("合约信息查询成功")
 
@@ -646,26 +660,26 @@ class CtpTdApi(TraderApiPy):
                 self.onRtnTrade(data)
             self.trade_data.clear()
 
-    def onRtnOrder(self, data: dict) -> None:
+    def OnRtnOrder(self, pOrder: OrderField) -> None:
         """委托更新推送"""
         if not self.contract_inited:
-            self.order_data.append(data)
+            self.order_data.append(pOrder)
             return
 
-        symbol: str = data["InstrumentID"]
+        symbol: str = to_str(pOrder.InstrumentID)
         contract: ContractData = symbol_contract_map[symbol]
 
-        frontid: int = data["FrontID"]
-        sessionid: int = data["SessionID"]
-        order_ref: str = data["OrderRef"]
+        frontid: int = pOrder.FrontID
+        sessionid: int = pOrder.SessionID
+        order_ref: str = to_str(pOrder.OrderRef)
         orderid: str = f"{frontid}_{sessionid}_{order_ref}"
 
-        timestamp: str = f"{data['InsertDate']} {data['InsertTime']}"
+        timestamp: str = f"{to_str(pOrder.InsertDate)} {to_str(pOrder.InsertTime)}"
         dt: datetime = datetime.strptime(timestamp, "%Y%m%d %H:%M:%S")
         dt: datetime = dt.replace(tzinfo=CHINA_TZ)
 
-        tp: tuple = (data["OrderPriceType"], data["TimeCondition"], data["VolumeCondition"])
-        order_type: OrderType = ORDERTYPE_CTP2VT.get(tp, None)
+        tp: tuple = (to_str(pOrder.OrderPriceType), to_str(pOrder.TimeCondition), to_str(pOrder.VolumeCondition))
+        order_type: OrderType | None = ORDERTYPE_CTP2VT.get(tp, None)
         if not order_type:
             self.gateway.write_log(f"收到不支持的委托类型，委托号：{orderid}")
             return
@@ -675,31 +689,31 @@ class CtpTdApi(TraderApiPy):
             exchange=contract.exchange,
             orderid=orderid,
             type=order_type,
-            direction=DIRECTION_CTP2VT[data["Direction"]],
-            offset=OFFSET_CTP2VT[data["CombOffsetFlag"]],
-            price=data["LimitPrice"],
-            volume=data["VolumeTotalOriginal"],
-            traded=data["VolumeTraded"],
-            status=STATUS_CTP2VT[data["OrderStatus"]],
+            direction=DIRECTION_CTP2VT[to_str(pOrder.Direction)],
+            offset=OFFSET_CTP2VT[to_str(pOrder.CombOffsetFlag)],
+            price=pOrder.LimitPrice,
+            volume=pOrder.VolumeTotalOriginal,
+            traded=pOrder.VolumeTraded,
+            status=STATUS_CTP2VT[to_str(pOrder.OrderStatus)],
             datetime=dt,
             gateway_name=self.gateway_name
         )
         self.gateway.on_order(order)
 
-        self.sysid_orderid_map[data["OrderSysID"]] = orderid
+        self.sysid_orderid_map[to_str(pOrder.OrderSysID)] = orderid
 
-    def onRtnTrade(self, data: dict) -> None:
+    def OnRtnTrade(self, pTrade: TradeField) -> None:
         """成交数据推送"""
         if not self.contract_inited:
-            self.trade_data.append(data)
+            self.trade_data.append(pTrade)
             return
 
-        symbol: str = data["InstrumentID"]
+        symbol: str = to_str(pTrade.InstrumentID)
         contract: ContractData = symbol_contract_map[symbol]
 
-        orderid: str = self.sysid_orderid_map[data["OrderSysID"]]
+        orderid: str = self.sysid_orderid_map[to_str(pTrade.OrderSysID)]
 
-        timestamp: str = f"{data['TradeDate']} {data['TradeTime']}"
+        timestamp: str = f"{pTrade.TradeDate} {pTrade.TradeTime}"
         dt: datetime = datetime.strptime(timestamp, "%Y%m%d %H:%M:%S")
         dt: datetime = dt.replace(tzinfo=CHINA_TZ)
 
@@ -707,11 +721,11 @@ class CtpTdApi(TraderApiPy):
             symbol=symbol,
             exchange=contract.exchange,
             orderid=orderid,
-            tradeid=data["TradeID"],
-            direction=DIRECTION_CTP2VT[data["Direction"]],
-            offset=OFFSET_CTP2VT[data["OffsetFlag"]],
-            price=data["Price"],
-            volume=data["Volume"],
+            tradeid=to_str(pTrade.TradeID),
+            direction=DIRECTION_CTP2VT[to_str(pTrade.Direction)],
+            offset=OFFSET_CTP2VT[to_str(pTrade.OffsetFlag)],
+            price=pTrade.Price,
+            volume=pTrade.Volume,
             datetime=dt,
             gateway_name=self.gateway_name
         )
@@ -735,13 +749,13 @@ class CtpTdApi(TraderApiPy):
 
         if not self.connect_status:
             path: Path = get_folder_path(self.gateway_name.lower())
-            self.createFtdcTraderApi((str(path) + "\\Td").encode("GBK"))
+            self.Create((str(path) + "\\Td"))
 
-            self.subscribePrivateTopic(0)
-            self.subscribePublicTopic(0)
+            self.SubscribePrivateTopic(0)
+            self.SubscribePublicTopic(0)
 
-            self.registerFront(address)
-            self.init()
+            self.RegisterFront(address)
+            self.Init()
 
             self.connect_status = True
         else:
@@ -752,30 +766,29 @@ class CtpTdApi(TraderApiPy):
         if self.auth_failed:
             return
 
-        ctp_req: dict = {
-            "UserID": self.userid,
-            "BrokerID": self.brokerid,
-            "AuthCode": self.auth_code,
-            "AppID": self.appid
-        }
+        pReqAuthenticate = ReqAuthenticateField(
+            BrokerID=self.brokerid,
+            UserID=self.userid,
+            AuthCode=self.auth_code,
+            AppID=self.appid,
+        )
 
         self.reqid += 1
-        self.reqAuthenticate(ctp_req, self.reqid)
+        self.ReqAuthenticate(pReqAuthenticate, self.reqid)
 
     def login(self) -> None:
         """用户登录"""
         if self.login_failed:
             return
 
-        ctp_req: dict = {
-            "UserID": self.userid,
-            "Password": self.password,
-            "BrokerID": self.brokerid,
-            "AppID": self.appid
-        }
+        pReqUserLogin = ReqUserLoginField(
+            UserID=self.userid,
+            Password=self.password,
+            BrokerID=self.brokerid,
+        )
 
         self.reqid += 1
-        self.reqUserLogin(ctp_req, self.reqid)
+        self.ReqUserLogin(pReqUserLogin, self.reqid)
 
     def send_order(self, req: OrderRequest) -> str:
         """委托下单"""
@@ -792,29 +805,29 @@ class CtpTdApi(TraderApiPy):
         tp: tuple = ORDERTYPE_VT2CTP[req.type]
         price_type, time_condition, volume_condition = tp
 
-        ctp_req: dict = {
-            "InstrumentID": req.symbol,
-            "ExchangeID": req.exchange.value,
-            "LimitPrice": req.price,
-            "VolumeTotalOriginal": int(req.volume),
-            "OrderPriceType": price_type,
-            "Direction": DIRECTION_VT2CTP.get(req.direction, ""),
-            "CombOffsetFlag": OFFSET_VT2CTP.get(req.offset, ""),
-            "OrderRef": str(self.order_ref),
-            "InvestorID": self.userid,
-            "UserID": self.userid,
-            "BrokerID": self.brokerid,
-            "CombHedgeFlag": THOST_FTDC_HF_Speculation,
-            "ContingentCondition": THOST_FTDC_CC_Immediately,
-            "ForceCloseReason": THOST_FTDC_FCC_NotForceClose,
-            "IsAutoSuspend": 0,
-            "TimeCondition": time_condition,
-            "VolumeCondition": volume_condition,
-            "MinVolume": 1
-        }
+        pInputOrder = InputOrderField(
+            InstrumentID=req.symbol,
+            ExchangeID=req.exchange.value,
+            LimitPrice=req.price,
+            VolumeTotalOriginal=int(req.volume),
+            OrderPriceType=price_type,
+            Direction=DIRECTION_VT2CTP.get(req.direction, ""),
+            CombOffsetFlag=OFFSET_VT2CTP.get(req.offset, ""),
+            OrderRef=str(self.order_ref),
+            InvestorID=self.userid,
+            UserID=self.userid,
+            BrokerID=self.brokerid,
+            CombHedgeFlag=THOST_FTDC_HF_Speculation,
+            ContingentCondition=THOST_FTDC_CC_Immediately,
+            ForceCloseReason=THOST_FTDC_FCC_NotForceClose,
+            IsAutoSuspend=0,
+            TimeCondition=time_condition,
+            VolumeCondition=volume_condition,
+            MinVolume=1
+        )
 
         self.reqid += 1
-        n: int = self.reqOrderInsert(ctp_req, self.reqid)
+        n: int = self.ReqOrderInsert(pInputOrder, self.reqid)
         if n:
             self.gateway.write_log(f"委托请求发送失败，错误代码：{n}")
             return ""
@@ -829,42 +842,43 @@ class CtpTdApi(TraderApiPy):
         """委托撤单"""
         frontid, sessionid, order_ref = req.orderid.split("_")
 
-        ctp_req: dict = {
-            "InstrumentID": req.symbol,
-            "ExchangeID": req.exchange.value,
-            "OrderRef": order_ref,
-            "FrontID": int(frontid),
-            "SessionID": int(sessionid),
-            "ActionFlag": THOST_FTDC_AF_Delete,
-            "BrokerID": self.brokerid,
-            "InvestorID": self.userid
-        }
+        pInputOrderAction = InputOrderActionField(
+            InstrumentID=req.symbol,
+            ExchangeID=req.exchange.value,
+            OrderRef=order_ref,
+            FrontID=int(frontid),
+            SessionID=int(sessionid),
+            ActionFlag=THOST_FTDC_AF_Delete,
+            BrokerID=self.brokerid,
+            InvestorID=self.userid
+        )
 
         self.reqid += 1
-        self.reqOrderAction(ctp_req, self.reqid)
+        self.ReqOrderAction(pInputOrderAction, self.reqid)
 
     def query_account(self) -> None:
         """查询资金"""
         self.reqid += 1
-        self.reqQryTradingAccount({}, self.reqid)
+        pQryTradingAccount = QryTradingAccountField()
+        self.ReqQryTradingAccount(pQryTradingAccount, self.reqid)
 
     def query_position(self) -> None:
         """查询持仓"""
         if not symbol_contract_map:
             return
 
-        ctp_req: dict = {
-            "BrokerID": self.brokerid,
-            "InvestorID": self.userid
-        }
+        pQryInvestorPosition = QryInvestorPositionField(
+            BrokerID=self.brokerid,
+            InvestorID=self.userid
+        )
 
         self.reqid += 1
-        self.reqQryInvestorPosition(ctp_req, self.reqid)
+        self.ReqQryInvestorPosition(pQryInvestorPosition, self.reqid)
 
     def close(self) -> None:
         """关闭连接"""
         if self.connect_status:
-            self.exit()
+            self.gateway.write_log('CtpTdApi close. ')
 
 
 def adjust_price(price: float) -> float:
@@ -872,6 +886,7 @@ def adjust_price(price: float) -> float:
     if price == MAX_FLOAT:
         price = 0
     return price
+
 
 def to_str(b: bytes) -> str:
     return b.decode('utf8')
