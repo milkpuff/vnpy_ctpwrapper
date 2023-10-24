@@ -5,6 +5,7 @@ __pycache__/
 
 pyrightconfig.json
 /test.py
+/test
 
 # C extensions
 *.so
