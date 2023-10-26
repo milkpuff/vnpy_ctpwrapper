@@ -79,7 +79,9 @@ from .ctp_constant import (
     THOST_FTDC_VC_AV,
     THOST_FTDC_TC_IOC,
     THOST_FTDC_VC_CV,
-    THOST_FTDC_AF_Delete
+    THOST_FTDC_AF_Delete,
+    THOST_FTDC_BZTP_Future,
+    
 )
 
 
@@ -664,8 +666,8 @@ class CtpTdApi(TraderApiPy):
             self.order_data.append(pOrder)
             return
 
-        print(pOrder)
-        breakpoint()
+        # print(pOrder)
+        # breakpoint()
         symbol: str = pOrder.InstrumentID
         contract: ContractData = symbol_contract_map[symbol]
 
@@ -859,7 +861,7 @@ class CtpTdApi(TraderApiPy):
     def query_account(self) -> None:
         """查询资金"""
         self.reqid += 1
-        pQryTradingAccount = QryTradingAccountField()
+        pQryTradingAccount = QryTradingAccountField(BizType=THOST_FTDC_BZTP_Future)
         self.ReqQryTradingAccount(pQryTradingAccount, self.reqid)
 
     def query_position(self) -> None:
