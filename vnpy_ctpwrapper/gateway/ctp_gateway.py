@@ -81,7 +81,7 @@ from .ctp_constant import (
     THOST_FTDC_VC_CV,
     THOST_FTDC_AF_Delete,
     THOST_FTDC_BZTP_Future,
-    
+
 )
 
 
@@ -401,7 +401,7 @@ class CtpMdApi(MdApiPy):
             BrokerID=self.brokerid,
             UserID=self.userid,
             Password=self.password,
-            )
+        )
 
         self.reqid += 1
         self.ReqUserLogin(pReqUserLogin, self.reqid)
@@ -454,6 +454,9 @@ class CtpTdApi(TraderApiPy):
         self.trade_data: List[TradeField] = []
         self.positions: Dict[str, PositionData] = {}
         self.sysid_orderid_map: Dict[str, str] = {}
+        self.active_orders: dict[str, OrderData] = {}  # {orderid: order}
+        # {sysorder: order} wait for trade data, then push order data
+        self.order_cache: dict[str: OrderData] = {}
 
     def OnFrontConnected(self) -> None:
         """服务器连接成功回报"""
@@ -700,9 +703,22 @@ class CtpTdApi(TraderApiPy):
             datetime=dt,
             gateway_name=self.gateway_name
         )
-        self.gateway.on_order(order)
 
-        self.sysid_orderid_map[pOrder.OrderSysID] = orderid
+        old_order = self.active_orders.get(order.orderid)
+        if order.is_active():
+            self.active_orders[order.orderid] = order
+        else:
+            if order.orderid in self.active_orders:
+                self.active_orders.pop(order.orderid)
+        # update order after update trade, if trade exists.
+        if old_order and order.traded > old_order.traded:
+            self.order_cache[pOrder.OrderSysID] = order
+        else:
+            self.gateway.on_order(order)
+
+        order_sysid = pOrder.OrderSysID
+        if order_sysid not in self.sysid_orderid_map:
+            self.sysid_orderid_map[order_sysid] = orderid
 
     def OnRtnTrade(self, pTrade: TradeField) -> None:
         """成交数据推送"""
@@ -713,7 +729,8 @@ class CtpTdApi(TraderApiPy):
         symbol: str = pTrade.InstrumentID
         contract: ContractData = symbol_contract_map[symbol]
 
-        orderid: str = self.sysid_orderid_map[pTrade.OrderSysID]
+        order_sysid = pTrade.OrderSysID
+        orderid: str = self.sysid_orderid_map[order_sysid]
 
         timestamp: str = f"{pTrade.TradeDate} {pTrade.TradeTime}"
         dt: datetime = datetime.strptime(timestamp, "%Y%m%d %H:%M:%S")
@@ -732,6 +749,13 @@ class CtpTdApi(TraderApiPy):
             gateway_name=self.gateway_name
         )
         self.gateway.on_trade(trade)
+
+        # push order after trade; clear order_cache, sysid_orderid_map;
+        if order_sysid in self.order_cache:
+            order = self.order_cache.pop(order_sysid)
+            self.gateway.on_order(order)
+            if not order.is_active():
+                self.sysid_orderid_map.pop(order_sysid)
 
     def connect(
         self,
@@ -861,7 +885,8 @@ class CtpTdApi(TraderApiPy):
     def query_account(self) -> None:
         """查询资金"""
         self.reqid += 1
-        pQryTradingAccount = QryTradingAccountField(BizType=THOST_FTDC_BZTP_Future)
+        pQryTradingAccount = QryTradingAccountField(
+            BizType=THOST_FTDC_BZTP_Future)
         self.ReqQryTradingAccount(pQryTradingAccount, self.reqid)
 
     def query_position(self) -> None:
