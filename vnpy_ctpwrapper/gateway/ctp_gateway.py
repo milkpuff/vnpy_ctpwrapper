@@ -294,6 +294,7 @@ class CtpMdApi(MdApiPy):
 
     def OnRspUserLogin(self, pRspUserLogin: RspUserLoginField, pRspInfo: RspInfoField, nRequestID, bIsLast) -> None:
         """用户登录请求回报"""
+        # self.gateway.write_log(f'onRspUserLogin, TradingDay: {pRspUserLogin.TradingDay}, data: {pRspUserLogin}')
         if not pRspInfo.ErrorID:
             self.login_status = True
             self.gateway.write_log("行情服务器登录成功")
@@ -330,7 +331,7 @@ class CtpMdApi(MdApiPy):
         else:
             date_str: str = pDepthMarketData.ActionDay
 
-        timestamp: str = f"{date_str} {pDepthMarketData.UpdateTime}.{int(pDepthMarketData.UpdateMillisec/100)}"
+        timestamp: str = f"{date_str} {pDepthMarketData.UpdateTime}.{pDepthMarketData.UpdateMillisec}"
         dt: datetime = datetime.strptime(timestamp, "%Y%m%d %H:%M:%S.%f")
         dt: datetime = dt.replace(tzinfo=CHINA_TZ)
 
@@ -479,7 +480,9 @@ class CtpTdApi(TraderApiPy):
             self.gateway.write_log("交易服务器授权验证成功")
             self.login()
         else:
-            self.auth_failed = True
+            # 如果是授权码错误，则禁止再次发起认证
+            if pRspInfo.ErrorID == 63:
+                self.auth_failed = True
             self.gateway.write_error("交易服务器授权验证失败", pRspInfo)
 
     def OnRspUserLogin(self, pRspUserLogin: RspUserLoginField, pRspInfo: RspInfoField, nRequestID, bIsLast) -> None:
@@ -710,9 +713,14 @@ class CtpTdApi(TraderApiPy):
         else:
             if order.orderid in self.active_orders:
                 self.active_orders.pop(order.orderid)
+
         # update order after update trade, if trade exists.
-        if old_order and order.traded > old_order.traded:
-            self.order_cache[pOrder.OrderSysID] = order
+        if old_order:
+            # filter duplicated order, traded and status both not changed
+            if old_order.traded == order.traded and old_order.status == order.status:
+                return
+            elif order.traded > old_order.traded:
+                self.order_cache[pOrder.OrderSysID] = order
         else:
             self.gateway.on_order(order)
 
