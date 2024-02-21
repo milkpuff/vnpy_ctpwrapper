@@ -3,6 +3,7 @@ from datetime import datetime
 from time import sleep
 from typing import Any, Dict, List, Tuple
 from pathlib import Path
+from copy import copy
 
 from vnpy.event import EventEngine
 from vnpy.trader.constant import (
@@ -663,17 +664,15 @@ class CtpTdApi(TraderApiPy):
             self.order_data.clear()
 
             for data in self.trade_data:
-                self.onRtnTrade(data)
+                self.OnRtnTrade(data)
             self.trade_data.clear()
 
     def OnRtnOrder(self, pOrder: OrderField) -> None:
         """委托更新推送"""
         if not self.contract_inited:
-            self.order_data.append(pOrder)
+            self.order_data.append(copy(pOrder))
             return
 
-        # print(pOrder)
-        # breakpoint()
         symbol: str = pOrder.InstrumentID
         contract: ContractData = symbol_contract_map[symbol]
 
@@ -717,10 +716,18 @@ class CtpTdApi(TraderApiPy):
         # update order after update trade, if trade exists.
         if old_order:
             # filter duplicated order, traded and status both not changed
-            if old_order.traded == order.traded and old_order.status == order.status:
-                return
+            if old_order.traded == order.traded:
+                if old_order.status == order.status:
+                    return
+                else:
+                    self.gateway.on_order(order)
+                    # print('on order: ', order)
+
             elif order.traded > old_order.traded:
                 self.order_cache[pOrder.OrderSysID] = order
+                # print('cache order: ', order)
+            else:  # order.traded < old_order.traded
+                return
         else:
             self.gateway.on_order(order)
 
@@ -731,7 +738,7 @@ class CtpTdApi(TraderApiPy):
     def OnRtnTrade(self, pTrade: TradeField) -> None:
         """成交数据推送"""
         if not self.contract_inited:
-            self.trade_data.append(pTrade)
+            self.trade_data.append(copy(pTrade))
             return
 
         symbol: str = pTrade.InstrumentID
@@ -743,7 +750,6 @@ class CtpTdApi(TraderApiPy):
         timestamp: str = f"{pTrade.TradeDate} {pTrade.TradeTime}"
         dt: datetime = datetime.strptime(timestamp, "%Y%m%d %H:%M:%S")
         dt: datetime = dt.replace(tzinfo=CHINA_TZ)
-
         trade: TradeData = TradeData(
             symbol=symbol,
             exchange=contract.exchange,
